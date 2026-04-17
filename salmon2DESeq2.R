@@ -16,18 +16,12 @@ BiocManager::install()
 #  If the error persists, use BiocManager's built-in validation tool to identify specific broken dependencies:
 BiocManager::valid()
 
+# install out of date packages
 BiocManager::install(c(
-  "AnnotationFilter", "arm", "assorthead", "beachmat", "Biobase", "BiocGenerics", "BiocIO",
-  "BiocNeighbors", "BiocParallel", "Biostrings", "BSgenome", "DelayedArray", "DelayedMatrixStats",
-  "devtools", "DirichletMultinomial", "ensembldb", "GenomeInfoDb", "GenomicAlignments", "GenomicRanges",
-  "ggsci", "glmGamPoi", "glue", "h5mread", "HDF5Array", "IRanges", "KEGGREST", "leidenAlg",
-  "MatrixGenerics", "mvtnorm", "openssl", "pak", "parallelly", "ProtGenerics", "pwalign", "Rcpp",
-  "renv", "rhdf5", "rhdf5filters", "Rhdf5lib", "Rhtslib", "rJava", "Rsamtools", "rtracklayer",
-  "S4Arrays", "S7", "scater", "scDblFinder", "seqLogo", "SingleCellExperiment", "SparseArray",
-  "sparseMatrixStats", "SummarizedExperiment", "TFBSTools", "UCSC.utils", "V8", "XVector"
+  "arm", "devtools", "ggsci", "glue", "leidenAlg", "mvtnorm", "openssl", "pak", "parallelly", "Rcpp", "renv", "rJava", "S7", "scater", "V8"
 ), update = TRUE, ask = FALSE, force = TRUE)
 
-
+BiocManager::install("S4Vectors", type = "source")
 
 
 
@@ -53,21 +47,21 @@ names(files) <- sampleinfo$sample
 # This maps transcript IDs → gene IDs, required by tximport.
 library(GenomicFeatures)
 
-txdb <- makeTxDbFromGFF("Mus_musculus.GRCm38.correct_chrom_names.102.chr.gtf.gz", format = "gtf")
+txdb <- makeTxDbFromGFF("/Users/nikolasgiannak/Desktop/Teaching/RNAseqCourse/Data/Mus_musculus.GRCm38.correct_chrom_names.102.chr.gtf.gz", format = "gtf")
 k <- keys(txdb, keytype = "TXNAME")
 tx2gene <- select(txdb, keys = k, keytype = "TXNAME", columns = "GENEID")
 # tx2gene has 2 cols: TXNAME, GENEID
 
-4. Import with tximport
-You have two options depending on which file you use:
-  Option A — use quant.sf (transcript-level → summarised to gene)
-txi <- tximport(
-  files,
+#4. Import with tximport
+#You have two options depending on which file you use:
+#  Option A — use quant.sf (transcript-level → summarised to gene)
+
+txi <- tximport(files,
   type = "salmon",
   tx2gene = tx2gene,
   ignoreTxVersion = TRUE  # strips version suffixes like ENST00000123.4 → ENST00000123)
   
-  Option B — use quant.genes.sf directly (already gene-level)
+#  Option B — use quant.genes.sf directly (already gene-level)
   
   gene_files <- file.path("/Users/nikolasgiannak/Desktop/Teaching/RNAseqCourse/Data", sampleinfo$sample, "quant.genes.sf")
   names(gene_files) <- sampleinfo$sample
@@ -78,7 +72,7 @@ txi <- tximport(
     txOut = FALSE,       # already gene-level, no summarisation needed
     tx2gene = NULL)
   
-  Recommendation: Option A (quant.sf) is preferred — it uses the full transcript-level uncertainty during summarisation, which is more statistically sound.
+#  Recommendation: Option A (quant.sf) is preferred — it uses the full transcript-level uncertainty during summarisation, which is more statistically sound.
   
   #  5. Run DESeq2
   dds <- DESeqDataSetFromTximport(
@@ -147,8 +141,7 @@ txi <- tximport(
   # 2. Sample table — edit paths to match your folder structure
   sampleinfo <- data.frame(
     condition = factor(c("WT","WT","WT","KO","KO","KO")),
-    row.names  = c("WT1","WT2","WT3","TKO1","TKO2","TKO3")
-  )
+    row.names  = c("WT1","WT2","WT3","TKO1","TKO2","TKO3"))
   
   files <- c(
     WT1 = "WT_1/quant.sf",
@@ -156,8 +149,7 @@ txi <- tximport(
     WT3 = "WT_3/quant.sf",
     TKO1 = "TKO_1/quant.sf",
     TKO2 = "TKO_2/quant.sf",
-    TKO3 = "TKO_3/quant.sf"
-  )
+    TKO3 = "TKO_3/quant.sf")
   
   # 3. Import
   txi <- tximport(files, type = "salmon", tx2gene = tx2gene, ignoreTxVersion = TRUE)
@@ -180,10 +172,14 @@ txi <- tximport(
   
   # Step 2 — Build tx2gene from GTF
   
-  txdb <- makeTxDbFromGFF("fgtf.gz", format = "gtf")
+#  txdb <- makeTxDbFromGFF("fgtf.gz", format = "gtf")
+#  k <- keys(txdb, keytype = "TXNAME")
+#  tx2gene <- select(txdb, keys = k, keytype = "TXNAME", columns = "GENEID")
+  
+  
+  txdb <- makeTxDbFromGFF("/Users/nikolasgiannak/Desktop/Teaching/RNAseqCourse/Data/Mus_musculus.GRCm38.correct_chrom_names.102.chr.gtf.gz", format = "gtf")
   k <- keys(txdb, keytype = "TXNAME")
   tx2gene <- select(txdb, keys = k, keytype = "TXNAME", columns = "GENEID")
-  
   
   # Step 3 — Sample table
   
