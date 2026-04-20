@@ -23,7 +23,7 @@ BiocManager::install(c(
 
 BiocManager::install("S4Vectors", type = "source")
 
-
+BiocManager::install("apeglm")
 
 BiocManager::install(c("tximport", "DESeq2", "tximeta", "AnnotationDbi"), force =TRUE)
 install.packages("readr")
@@ -36,7 +36,7 @@ library(DESeq2)
 sampleinfo <- data.frame(
   sample = c("WT_1", "WT_2", "WT_3", "TKO_1", "TKO_2", "TKO_3"),
   condition = factor(c("WT", "WT", "WT", "KO", "KO", "KO")),
-  row.names = c("WT1", "WT2", "WT2", "KO1", "KO2", "KO3")
+  row.names = c("WT_1", "WT_2", "WT_3", "TKO_1", "TKO_2", "TKO_3")
 )
 
 # Point to quant.sf files (transcript-level)
@@ -59,7 +59,7 @@ tx2gene <- select(txdb, keys = k, keytype = "TXNAME", columns = "GENEID")
 txi <- tximport(files,
   type = "salmon",
   tx2gene = tx2gene,
-  ignoreTxVersion = TRUE  # strips version suffixes like ENST00000123.4 → ENST00000123)
+  ignoreTxVersion = TRUE)  # strips version suffixes like ENST00000123.4 → ENST00000123)
   
 #  Option B — use quant.genes.sf directly (already gene-level)
   
@@ -93,7 +93,14 @@ txi <- tximport(files,
   
   # Shrink LFC (recommended for ranking/visualization)
   library(apeglm)
-  res_shrunk <- lfcShrink(dds, coef = "condition_KO_vs_WT", type = "apeglm")
+  res_shrunk <- lfcShrink(dds, coef = "condition_WT_vs_KO", type = "apeglm")
+  
+  
+  
+  resultsNames(dds)
+  
+  
+  
   
   # Summary
   summary(res_shrunk, alpha = 0.05)
@@ -101,9 +108,9 @@ txi <- tximport(files,
   # Save results
   res_df <- as.data.frame(res_shrunk)
   res_df <- res_df[order(res_df$padj), ]
-  write.csv(res_df, "KO_vs_WT_DESeq2_results.csv")
+  write.csv(res_df, "WT_vs_KO_DESeq2_results.csv")
   
-  7. Quick QC plots
+#   7. Quick QC plots
   # PCA
   vsd <- vst(dds, blind = TRUE)
   plotPCA(vsd, intgroup = "condition")
@@ -113,6 +120,150 @@ txi <- tximport(files,
   
   # Dispersion estimates
   plotDispEsts(dds)
+  
+  
+  
+  #  Here are the most common things people do with DESeq2 results:
+  #  Filter significant genes
+  
+  sig <- subset(res_shrunk, padj < 0.05 & abs(log2FoldChange) > 1)
+  #Volcano plot — visualise all genes at once
+  
+  library(ggplot2)
+  df <- as.data.frame(res)
+  ggplot(df, aes(log2FoldChange, -log10(padj))) +
+    geom_point() +
+    geom_hline(yintercept = -log10(0.05), color = "red") +
+    geom_vline(xintercept = c(-1, 1), color = "blue")
+  
+  # Heatmap — show expression patterns of top genes
+  
+  library(pheatmap)
+  top_genes <- head(order(res$padj), 50)
+  pheatmap(assay(vst(dds))[top_genes, ])
+  # PCA — check if samples cluster as expected
+ 
+  plotPCA(vst(dds), intgroup = "condition")
+ 
+  #   OR
+  
+  
+  library(ComplexHeatmap)
+  library(circlize)
+  my_col_fun <- colorRamp2(c(-2, 0, 2), c("gray", "white", "coral3")) 
+  
+  # get top 50 significant genes
+  top_genes <- head(order(res$padj), 50)
+  
+  # get normalised counts for those genes
+  mat <- assay(vst(dds))[top_genes, ]
+  
+  # scale by row (so colours show relative expression)
+  mat_scaled <- t(scale(t(mat)))
+  
+  # annotation bar on top showing WT vs KO
+  col_ann <- HeatmapAnnotation(
+    condition = sampleinfo$condition,
+    col = list(condition = c("WT" = "firebrick2", "KO" = "cyan4")))
+  
+  # draw heatmap
+  Heatmap(mat_scaled,
+          top_annotation = col_ann,
+          name = "Z-score",
+          col = my_col_fun,
+          show_row_names = TRUE,
+          show_column_names = TRUE)
+  
+  #It gives you:
+  #  •	Rows = top 50 genes by adjusted p-value
+  #•	Columns = your 6 samples
+  #•	Colours = scaled expression (Z-score)
+  #•	Top bar = WT vs KO annotation
+  #Here is an example with split between up- and down-regulated genes
+  
+  
+  library(ComplexHeatmap)
+  
+  # get significant genes
+  sig <- subset(res, padj < 0.05 & abs(log2FoldChange) > 1)
+  
+  # split into up and down
+  up   <- rownames(subset(sig, log2FoldChange > 1))
+  down <- rownames(subset(sig, log2FoldChange < -1))
+  
+  # combine and get normalised counts
+  top_genes <- c(up, down)
+  mat <- assay(vst(dds))[top_genes, ]
+  mat_scaled <- t(scale(t(mat)))
+  
+  # split vector — tells heatmap which genes are up vs down
+  split <- factor(c(rep("Upregulated", length(up)), 
+                    rep("Downregulated", length(down))),
+                  levels = c("Upregulated", "Downregulated"))
+  
+  # top annotation
+  col_ann <- HeatmapAnnotation(
+    condition = sampleinfo$condition,
+    col = list(condition = c("WT" = "firebrick2", "KO" = "cyan4")))
+  
+  # draw heatmap
+  Heatmap(
+    mat_scaled,
+    top_annotation = col_ann,
+    name = "Z-score",
+    row_split = split,
+    row_title_gp = gpar(fontsize = 12, fontface = "bold"),
+    show_row_names = FALSE,   # set TRUE if you want gene names (can get crowded)
+    show_column_names = TRUE)
+  #The key addition is row_split = split which divides the heatmap into two blocks — upregulated genes on top, downregulated below, each with their own cluster.
+  #Set show_row_names = TRUE if you want gene names on the side, but if you have many significant genes it gets crowded.
+  
+  #PCA — check if samples cluster as expected
+  
+  plotPCA(vst(dds), intgroup = "condition")
+  
+  #Gene Ontology (GO) enrichment — what biological processes are affected?
+  
+  library(clusterProfiler)
+  ego <- enrichGO(gene = rownames(sig), OrgDb = org.Mm.eg.db, ont = "BP")
+  barplot(ego)
+  KEGG pathway analysis — which pathways are enriched?
+    
+    ekegg <- enrichKEGG(gene = rownames(sig))
+  dotplot(ekegg)
+  
+  
+  #GSEA — gene set enrichment using the full ranked gene list (not just significant ones)
+  
+  ranked <- res$log2FoldChange
+  names(ranked) <- rownames(res)
+  ranked <- sort(ranked, decreasing = TRUE)
+  gsea_res <- gseGO(ranked, OrgDb = org.Mm.eg.db, ont = "BP")
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
   
   
   
@@ -183,20 +334,25 @@ txi <- tximport(files,
   
   # Step 3 — Sample table
   
+  
+  
+  files <- file.path("/Users/nikolasgiannak/Desktop/Teaching/RNAseqCourse/Data", sampleinfo$sample, "quant.genes.sf")
+  names(files) <- sampleinfo$sample
+  
   sampleinfo <- data.frame(
     condition = factor(c("WT","WT","WT","KO","KO","KO")),
-    row.names  = c("WT1","WT2","WT3","TKO1","TKO2","TKO3")
+    row.names  = c("WT_1","WT_2","WT_3","TKO_1","TKO_2","TKO_3")
   )
   
   #   Step 4 — File paths
   
   files <- c(
-    WT1 = "WT_1/quant.sf",
-    WT2 = "WT_2/quant.sf",
-    WT3 = "WT_3/quant.sf",
-    TKO1 = "TKO_1/quant.sf",
-    TKO2 = "TKO_2/quant.sf",
-    TKO3 = "TKO_3/quant.sf"
+    WT_1 = "WT_1/quant.sf",
+    WT_2 = "WT_2/quant.sf",
+    WT_3 = "WT_3/quant.sf",
+    TKO_1 = "TKO_1/quant.sf",
+    TKO_2 = "TKO_2/quant.sf",
+    TKO_3 = "TKO_3/quant.sf")
     
     # Step 5 — Import Salmon data
     
@@ -216,70 +372,74 @@ txi <- tximport(files,
     write.csv(as.data.frame(res), "results.csv")
     
     -----------------------------------------------------------------------------------------------------------------------------------
-      DIFFERENCE OF quant.sf and quant.genes.sf
-    quant.sf — transcript level
-    •	Each row is a transcript (e.g. ENST00000123)
-    •	One gene can have multiple rows (one per isoform)
-    •	More detailed, but needs to be summarised to gene level before DESeq2 (tximport does this for you via tx2gene)
-    quant.genes.sf — gene level
-    •	Each row is a gene (e.g. ENSG00000123)
-    •	Already summarised, one row per gene
-    •	Simpler, ready to use directly
+#      DIFFERENCE OF quant.sf and quant.genes.sf
+#    quant.sf — transcript level
+#    •	Each row is a transcript (e.g. ENST00000123)
+#    •	One gene can have multiple rows (one per isoform)
+#    •	More detailed, but needs to be summarised to gene level before DESeq2 (tximport does this for you via tx2gene)
+#    quant.genes.sf — gene level
+#    •	Each row is a gene (e.g. ENSG00000123)
+#    •	Already summarised, one row per gene
+#    •	Simpler, ready to use directly
     
-    Which to use?
-      •	Use quant.sf (transcript level). It's better because tximport summarises it to gene level while accounting for transcript-level uncertainty, which gives more accurate counts for DESeq2.
-•	quant.genes.sf is fine too and simpler, but slightly less statistically rigorous.
-•	For your simple analysis either works, but the script I gave you already uses quant.sf which is the recommended way.
+#    Which to use?
+#      •	Use quant.sf (transcript level). It's better because tximport summarises it to gene level while accounting for transcript-level uncertainty, which gives more accurate counts for DESeq2.
+# •	quant.genes.sf is fine too and simpler, but slightly less statistically rigorous.
+#•	For your simple analysis either works, but the script I gave you already uses quant.sf which is the recommended way.
 
-The GTF file is needed to build the tx2gene table — a simple map that links every transcript to its gene:
-  ENST00000123  →  ENSG00000001
-ENST00000124  →  ENSG00000001
-ENST00000125  →  ENSG00000002
+#The GTF file is needed to build the tx2gene table — a simple map that links every transcript to its gene:
+#  ENST00000123  →  ENSG00000001
+#ENST00000124  →  ENSG00000001
+#ENST00000125  →  ENSG00000002
 ...
-Because quant.sf is at the transcript level, tximport needs this map to know which transcripts belong to the same gene so it can add them up into a single gene count.
-If you use quant.genes.sf instead, you don't need the GTF at all, because the summarisation to gene level is already done by Salmon. That's one advantage of using the genes file.
+#Because quant.sf is at the transcript level, tximport needs this map to know which transcripts belong to the same gene so it can add them up into a single gene count.
+# If you use quant.genes.sf instead, you don't need the GTF at all, because the summarisation to gene level is already done by Salmon. That's one advantage of using the genes file.
 -----------------------------------------------------------------------------------------------------------------------------------
-  Here are the most common things people do with DESeq2 results:
-  Filter significant genes
-r
+#  Here are the most common things people do with DESeq2 results:
+#  Filter significant genes
+
 sig <- subset(res, padj < 0.05 & abs(log2FoldChange) > 1)
-Volcano plot — visualise all genes at once
-r
+#Volcano plot — visualise all genes at once
+
 library(ggplot2)
 df <- as.data.frame(res)
 ggplot(df, aes(log2FoldChange, -log10(padj))) +
   geom_point() +
   geom_hline(yintercept = -log10(0.05), color = "red") +
   geom_vline(xintercept = c(-1, 1), color = "blue")
-Heatmap — show expression patterns of top genes
-r
+
+# Heatmap — show expression patterns of top genes
+
 library(pheatmap)
 top_genes <- head(order(res$padj), 50)
 pheatmap(assay(vst(dds))[top_genes, ])
-PCA — check if samples cluster as expected
-r
+# PCA — check if samples cluster as expected
+
 plotPCA(vst(dds), intgroup = "condition")
-Filter significant genes
-r
+
+  #Filter significant genes
+
 sig <- subset(res, padj < 0.05 & abs(log2FoldChange) > 1)
-Volcano plot — visualise all genes at once
-r
+
+# Volcano plot — visualise all genes at once
+
 library(ggplot2)
 df <- as.data.frame(res)
 ggplot(df, aes(log2FoldChange, -log10(padj))) +
   geom_point() +
   geom_hline(yintercept = -log10(0.05), color = "red") +
   geom_vline(xintercept = c(-1, 1), color = "blue")
-Heatmap — show expression patterns of top genes
-r
+
+# Heatmap — show expression patterns of top genes
+
 library(pheatmap)
 top_genes <- head(order(res$padj), 50)
 pheatmap(assay(vst(dds))[top_genes, ])
 
 
-OR
+#   OR
 
-r
+
 library(ComplexHeatmap)
 
 # get top 50 significant genes
@@ -294,26 +454,23 @@ mat_scaled <- t(scale(t(mat)))
 # annotation bar on top showing WT vs KO
 col_ann <- HeatmapAnnotation(
   condition = sampleinfo$condition,
-  col = list(condition = c("WT" = "blue", "KO" = "red"))
-)
+  col = list(condition = c("WT" = "blue", "KO" = "red")))
 
 # draw heatmap
-Heatmap(
-  mat_scaled,
+Heatmap(mat_scaled,
   top_annotation = col_ann,
   name = "Z-score",
   show_row_names = TRUE,
-  show_column_names = TRUE
-)
+  show_column_names = TRUE)
 
-It gives you:
-  •	Rows = top 50 genes by adjusted p-value
-•	Columns = your 6 samples
-•	Colours = scaled expression (Z-score)
-•	Top bar = WT vs KO annotation
-Here is an example with split between up- and down-regulated genes
+#It gives you:
+#  •	Rows = top 50 genes by adjusted p-value
+#•	Columns = your 6 samples
+#•	Colours = scaled expression (Z-score)
+#•	Top bar = WT vs KO annotation
+#Here is an example with split between up- and down-regulated genes
 
-r
+
 library(ComplexHeatmap)
 
 # get significant genes
@@ -336,8 +493,7 @@ split <- factor(c(rep("Upregulated", length(up)),
 # top annotation
 col_ann <- HeatmapAnnotation(
   condition = sampleinfo$condition,
-  col = list(condition = c("WT" = "blue", "KO" = "red"))
-)
+  col = list(condition = c("WT" = "blue", "KO" = "red")))
 
 # draw heatmap
 Heatmap(
@@ -347,26 +503,29 @@ Heatmap(
   row_split = split,
   row_title_gp = gpar(fontsize = 12, fontface = "bold"),
   show_row_names = FALSE,   # set TRUE if you want gene names (can get crowded)
-  show_column_names = TRUE
-)
-The key addition is row_split = split which divides the heatmap into two blocks — upregulated genes on top, downregulated below, each with their own cluster.
-Set show_row_names = TRUE if you want gene names on the side, but if you have many significant genes it gets crowded.
+  show_column_names = TRUE)
+#The key addition is row_split = split which divides the heatmap into two blocks — upregulated genes on top, downregulated below, each with their own cluster.
+#Set show_row_names = TRUE if you want gene names on the side, but if you have many significant genes it gets crowded.
 
-PCA — check if samples cluster as expected
-r
+#PCA — check if samples cluster as expected
+
 plotPCA(vst(dds), intgroup = "condition")
 
-Gene Ontology (GO) enrichment — what biological processes are affected?
-  r
+#Gene Ontology (GO) enrichment — what biological processes are affected?
+
 library(clusterProfiler)
+BiocManager::install("org.Mm.eg.db")
+library(org.Mm.eg.db)
 ego <- enrichGO(gene = rownames(sig), OrgDb = org.Mm.eg.db, ont = "BP")
 barplot(ego)
-KEGG pathway analysis — which pathways are enriched?
-  r
+# KEGG pathway analysis — which pathways are enriched?
+
 ekegg <- enrichKEGG(gene = rownames(sig))
 dotplot(ekegg)
-GSEA — gene set enrichment using the full ranked gene list (not just significant ones)
-r
+
+
+#GSEA — gene set enrichment using the full ranked gene list (not just significant ones)
+
 ranked <- res$log2FoldChange
 names(ranked) <- rownames(res)
 ranked <- sort(ranked, decreasing = TRUE)
